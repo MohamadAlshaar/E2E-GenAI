@@ -127,8 +127,8 @@ if [ "${DEPLOY_POOL}" = "1" ]; then
 fi
 
 log "Waiting for llm-d deployments"
-kubectl rollout status deployment/"${INFRA_DEPLOYMENT}" -n "${NAMESPACE}" --timeout=300s
-kubectl rollout status deployment/"${MODEL_DEPLOYMENT}" -n "${NAMESPACE}" --timeout=900s
+kubectl rollout status deployment/"${INFRA_DEPLOYMENT}" -n "${NAMESPACE}" --timeout=600s
+kubectl rollout status deployment/"${MODEL_DEPLOYMENT}" -n "${NAMESPACE}" --timeout=2000s
 
 if [ "${DEPLOY_POOL}" = "1" ]; then
   kubectl rollout status deployment/"${POOL_DEPLOYMENT}" -n "${NAMESPACE}" --timeout=300s
