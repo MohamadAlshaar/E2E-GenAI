@@ -267,6 +267,7 @@ def ensure_collection(
     drop_existing: bool,
 ) -> None:
     required_fields = {
+        "pk",
         "tenant_id",
         "source",
         "page",
@@ -291,8 +292,8 @@ def ensure_collection(
                 )
             return
 
-    schema = MilvusClient.create_schema(auto_id=True, enable_dynamic_field=False)
-    schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
+    schema = MilvusClient.create_schema(auto_id=False, enable_dynamic_field=True)
+    schema.add_field(field_name="pk", datatype=DataType.VARCHAR, is_primary=True, max_length=128)
 
     schema.add_field(
         field_name="tenant_id",
@@ -300,12 +301,13 @@ def ensure_collection(
         max_length=128,
         is_partition_key=bool(use_partition_key),
     )
-    schema.add_field(field_name="source", datatype=DataType.VARCHAR, max_length=512)
-    schema.add_field(field_name="page", datatype=DataType.INT32)
-    schema.add_field(field_name="chunk_id", datatype=DataType.VARCHAR, max_length=64)
-    schema.add_field(field_name="object_key", datatype=DataType.VARCHAR, max_length=1024)
-    schema.add_field(field_name="pdf_object_key", datatype=DataType.VARCHAR, max_length=1024)
+    schema.add_field(field_name="source", datatype=DataType.VARCHAR, max_length=1024)
+    schema.add_field(field_name="page", datatype=DataType.INT64)
+    schema.add_field(field_name="chunk_id", datatype=DataType.VARCHAR, max_length=256)
+    schema.add_field(field_name="object_key", datatype=DataType.VARCHAR, max_length=2048)
+    schema.add_field(field_name="pdf_object_key", datatype=DataType.VARCHAR, max_length=2048)
     schema.add_field(field_name="text_sha256", datatype=DataType.VARCHAR, max_length=64)
+    schema.add_field(field_name="text", datatype=DataType.VARCHAR, max_length=65535)
     schema.add_field(field_name="embedding", datatype=DataType.FLOAT_VECTOR, dim=int(dim))
 
     if use_partition_key:
@@ -507,6 +509,7 @@ def main() -> None:
 
         rows.append(
             {
+                "pk": chunk_id,
                 "tenant_id": tenant,
                 "source": src,
                 "page": int(page),
@@ -514,6 +517,7 @@ def main() -> None:
                 "object_key": chunk_relative_key,
                 "pdf_object_key": pdf_object_key,
                 "text_sha256": text_sha256,
+                "text": text[:65535],
             }
         )
         texts.append(text)

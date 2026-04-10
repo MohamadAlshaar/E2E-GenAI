@@ -261,12 +261,13 @@ ingest_rag() {
   # Ensure port-forwards for Milvus and SeaweedFS S3
   log "Setting up port-forwards for ingestion"
   ensure_port_forward "${FASTAPI_NAMESPACE}" milvus "${MILVUS_LOCAL_PORT}" 19530
+  ensure_port_forward "${FASTAPI_NAMESPACE}" milvus 9091 9091
   ensure_port_forward "${FASTAPI_NAMESPACE}" seaweed-s3 "${S3_LOCAL_PORT}" 8333
 
-  # Wait for Milvus to be ready
+  # Wait for Milvus to be ready (healthz is on the monitoring port 9091, not the API port 19530)
   log "Waiting for Milvus to be reachable..."
-  if ! wait_http_ok "http://127.0.0.1:${MILVUS_LOCAL_PORT}/healthz" 60; then
-    die "Milvus not reachable on port ${MILVUS_LOCAL_PORT}"
+  if ! wait_http_ok "http://127.0.0.1:9091/healthz" 60; then
+    die "Milvus not reachable on port 9091"
   fi
 
   # Check if collection already has data
@@ -296,8 +297,8 @@ except:
   # Install Python deps if needed
   python3 -c "import pymilvus, boto3, pypdf, sentence_transformers" 2>/dev/null || {
     log "Installing Python dependencies for ingestion..."
-    pip install --quiet pymilvus boto3 pypdf sentence-transformers Pillow 2>/dev/null || \
-    python3 -m pip install --quiet --user pymilvus boto3 pypdf sentence-transformers Pillow
+    pip install --quiet pymilvus boto3 pypdf sentence-transformers "Pillow>=9.1.0" 2>/dev/null || \
+    python3 -m pip install --quiet --user pymilvus boto3 pypdf sentence-transformers "Pillow>=9.1.0"
   }
 
   local drop_flag=""
