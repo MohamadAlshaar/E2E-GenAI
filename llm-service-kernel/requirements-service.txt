@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+requests
+pydantic
+transformers
+sentence-transformers
+gptcache
+faiss-cpu
+llama-index
+llama-index-embeddings-huggingface
+llama-index-vector-stores-faiss

@@ -1,0 +1,14 @@
+FROM llm-service-kernel:fastapi-base
+
+WORKDIR /app
+
+COPY pyproject.toml README.md ./
+COPY src ./src
+COPY scripts ./scripts
+COPY .env.example ./.env.example
+
+RUN chmod +x /app/scripts/run_service.sh
+
+EXPOSE 8080
+
+CMD ["/app/scripts/run_service.sh"]

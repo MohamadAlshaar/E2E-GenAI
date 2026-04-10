@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-service-kernel
+  namespace: llm-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: llm-service-kernel
+  template:
+    metadata:
+      labels:
+        app: llm-service-kernel
+    spec:
+      containers:
+        - name: llm-service-kernel
+          image: llm-service-kernel:fastapi-patched
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: llm-service-kernel-config
+          volumeMounts:
+            - name: semcache-model
+              mountPath: /models/all-MiniLM-L6-v2
+              readOnly: true
+            - name: bge-model
+              mountPath: /models/bge-base-en-v1.5
+              readOnly: true
+            - name: tokenizer-model
+              mountPath: /models/Qwen2.5-0.5B-Instruct
+              readOnly: true
+            - name: rag-store-tenants
+              mountPath: /rag_store_tenants
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 8
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 10
+      volumes:
+        - name: semcache-model
+          hostPath:
+            path: /mnt/llm-host/all-MiniLM-L6-v2
+            type: Directory
+        - name: bge-model
+          hostPath:
+            path: /mnt/llm-host/bge-base-en-v1.5
+            type: Directory
+        - name: tokenizer-model
+          hostPath:
+            path: /mnt/llm-host/Qwen2.5-0.5B-Instruct
+            type: Directory
+        - name: rag-store-tenants
+          hostPath:
+            path: /mnt/llm-host/rag_store_tenants
+            type: Directory

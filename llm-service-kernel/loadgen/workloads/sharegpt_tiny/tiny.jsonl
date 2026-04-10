@@ -1,0 +1,5 @@
+{"conversations":[{"from":"human","value":"Explain what a CPU cache is in simple terms."},{"from":"gpt","value":"A CPU cache is a very fast small memory near the processor that stores frequently used data so the CPU can access it quickly."}]}
+{"conversations":[{"from":"human","value":"What is machine learning?"},{"from":"gpt","value":"Machine learning is a way for computers to learn patterns from data and make predictions or decisions without being explicitly programmed for every case."}]}
+{"conversations":[{"from":"human","value":"Why is the sky blue?"},{"from":"gpt","value":"The sky looks blue because air molecules scatter shorter blue wavelengths of sunlight more than longer red wavelengths."}]}
+{"conversations":[{"from":"human","value":"What does an operating system do?"},{"from":"gpt","value":"An operating system manages hardware, runs programs, handles files, and provides the basic services applications need."}]}
+{"conversations":[{"from":"human","value":"Explain recursion briefly."},{"from":"gpt","value":"Recursion is when a function solves a problem by calling itself on smaller versions of the same problem until a base case is reached."}]}

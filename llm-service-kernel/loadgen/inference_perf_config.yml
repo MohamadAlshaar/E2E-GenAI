@@ -1,0 +1,43 @@
+api:
+  type: completion
+
+server:
+  type: vllm
+  model_name: "qwen2.5-0.5b"
+ # base_url: "http://127.0.0.1:8001"
+  base_url: "http://host.docker.internal:8001"
+  ignore_eos: true
+
+tokenizer:
+  #pretrained_model_name_or_path: "/home/mohamad/LLM-end-to-end-Service-main/Qwen2.5-0.5B-Instruct"
+  pretrained_model_name_or_path: "/models/Qwen2.5-0.5B-Instruct"
+
+data:
+  type: random
+  input_distribution:
+    min: 20
+    max: 200
+    mean: 80
+    std_dev: 30
+    total_count: 200
+  output_distribution:
+    min: 16
+    max: 128
+    mean: 64
+    std_dev: 16
+    total_count: 200
+
+load:
+  type: constant
+  stages:
+    - rate: 2
+      duration: 30
+    - rate: 4
+      duration: 30
+metrics:
+  type: default
+report:
+  request_lifecycle:
+    summary: true
+    per_stage: true
+    per_request: true

@@ -1,0 +1,43 @@
+# llm-service-kernel generated build inputs
+llm-service-kernel/fastapi_runtime_assets/
+llm-service-kernel/vendor/
+llm-service-kernel/.tmp_runtime_assets/
+
+# llm-service-kernel local runtime/cache/state
+llm-service-kernel/.gptcache/
+llm-service-kernel/*.db
+llm-service-kernel/state/
+
+# large models — downloaded via scripts/download_models.sh
+bge-base-en-v1.5/
+all-MiniLM-L6-v2/
+Qwen2.5-0.5B-Instruct/
+
+# RAG documents — downloaded via scripts/download_sample_docs.sh
+docs_RAG/
+
+# generated / runtime data
+benchmark_data/
+data/
+docs_RAG_tenants/
+fastapi_runtime_assets/
+infra/
+llm-d/
+milvus-standalone/
+mongo_8.tar
+rag_store_tenants/
+rag_store/
+offline_datasets/
+release-bundle/
+
+# generated tar/images under llmd local deploy area
+llm-service-kernel/deploy/llmd-local/*.tar
+llm-service-kernel/deploy/llmd-local/images/*.tar
+# NOTE: *.tgz Helm charts ARE committed — they are required for deployment
+
+LLM/
+LLM_broken/
+
+# OS / editor
+.DS_Store
+.claude/

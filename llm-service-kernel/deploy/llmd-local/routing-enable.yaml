@@ -1,0 +1,26 @@
+routing:
+  servicePort: 8000
+
+  epp:
+    create: true
+    service:
+      type: ClusterIP
+      port: 9002
+      targetPort: 9002
+      appProtocol: http2
+
+  inferencePool:
+    create: true
+    name: ms-local-qwen-pool
+    targetPortNumber: 8000
+    modelServerType: vllm
+    modelName: qwen2.5-0.5b
+    modelServers:
+      matchLabels:
+        llm-d.ai/inference-serving: "true"
+
+  inferenceModel:
+    create: true
+
+  httpRoute:
+    create: false
