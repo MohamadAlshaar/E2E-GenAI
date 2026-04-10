@@ -43,8 +43,11 @@ S3_LOCAL_PORT="${S3_LOCAL_PORT:-8333}"
 
 FASTAPI_NAMESPACE="${FASTAPI_NAMESPACE:-llm-service}"
 FASTAPI_SERVICE="${FASTAPI_SERVICE:-llm-service-kernel}"
+FASTAPI_DEPLOYMENT="${FASTAPI_DEPLOYMENT:-llm-service-kernel}"
 
 INGEST_TIMEOUT_S="${INGEST_TIMEOUT_S:-600}"
+
+PORT_FORWARD_LOG_DIR="/tmp/e2e-genai-portforward"
 
 _MANAGED_PIDS=()
 
@@ -64,25 +67,48 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
+# ── Port-forward management ───────────────────────────────────────────────
+kill_port() {
+  local port="$1"
+  local pids
+  pids="$(lsof -iTCP:"${port}" -sTCP:LISTEN -t 2>/dev/null || true)"
+  if [ -n "${pids}" ]; then
+    echo "${pids}" | xargs kill 2>/dev/null || true
+    sleep 1
+  fi
+}
+
 start_port_forward() {
   local namespace="$1" service="$2" local_port="$3" remote_port="$4"
 
   # Kill any existing forward on this port
-  if lsof -iTCP:"${local_port}" -sTCP:LISTEN -t >/dev/null 2>&1; then
-    local existing_pid
-    existing_pid="$(lsof -iTCP:"${local_port}" -sTCP:LISTEN -t 2>/dev/null | head -1)"
-    kill "${existing_pid}" >/dev/null 2>&1 || true
-    sleep 1
-  fi
+  kill_port "${local_port}"
 
-  kubectl port-forward -n "${namespace}" "svc/${service}" "${local_port}:${remote_port}" >/dev/null 2>&1 &
+  mkdir -p "${PORT_FORWARD_LOG_DIR}"
+  local log_file="${PORT_FORWARD_LOG_DIR}/${service}-${local_port}.log"
+
+  kubectl port-forward -n "${namespace}" "svc/${service}" "${local_port}:${remote_port}" >"${log_file}" 2>&1 &
   local pid=$!
   _MANAGED_PIDS+=("${pid}")
   sleep 2
 
   if ! kill -0 "${pid}" >/dev/null 2>&1; then
+    cat "${log_file}" >&2 2>/dev/null || true
     die "port-forward failed for svc/${service} on port ${local_port}"
   fi
+  ok "Port-forward: svc/${service} → localhost:${local_port}"
+}
+
+ensure_port_forward() {
+  local namespace="$1" service="$2" local_port="$3" remote_port="$4"
+
+  # Check if port is already forwarded and working
+  if curl -sf --connect-timeout 2 "http://127.0.0.1:${local_port}/" >/dev/null 2>&1 || \
+     lsof -iTCP:"${local_port}" -sTCP:LISTEN >/dev/null 2>&1; then
+    return 0
+  fi
+
+  start_port_forward "${namespace}" "${service}" "${local_port}" "${remote_port}"
 }
 
 wait_http_ok() {
@@ -90,12 +116,62 @@ wait_http_ok() {
   local deadline=$((SECONDS + timeout_s))
 
   while [ "${SECONDS}" -lt "${deadline}" ]; do
-    if curl -sf "${url}" >/dev/null 2>&1; then
+    if curl -sf --connect-timeout 3 "${url}" >/dev/null 2>&1; then
       return 0
     fi
     sleep 2
   done
   return 1
+}
+
+# ── Pod health checks ─────────────────────────────────────────────────────
+check_pods_healthy() {
+  local namespace="$1"
+  local not_ready
+  not_ready="$(kubectl get pods -n "${namespace}" --no-headers 2>/dev/null | grep -v 'Running\|Completed' || true)"
+
+  if [ -n "${not_ready}" ]; then
+    return 1
+  fi
+  return 0
+}
+
+wait_all_pods_ready() {
+  local namespace="$1" timeout_s="${2:-300}" label="${3:-}"
+  local deadline=$((SECONDS + timeout_s))
+
+  log "Waiting for all pods in ${namespace} to be ready..."
+  while [ "${SECONDS}" -lt "${deadline}" ]; do
+    if check_pods_healthy "${namespace}"; then
+      return 0
+    fi
+    sleep 5
+  done
+
+  warn "Some pods in ${namespace} are not ready after ${timeout_s}s:"
+  kubectl get pods -n "${namespace}" --no-headers 2>/dev/null | grep -v 'Running\|Completed' || true
+  return 1
+}
+
+recover_stuck_pods() {
+  local namespace="$1"
+
+  # Find pods in CrashLoopBackOff or Error state
+  local bad_pods
+  bad_pods="$(kubectl get pods -n "${namespace}" --no-headers 2>/dev/null | \
+    grep -E 'CrashLoopBackOff|Error|ImagePullBackOff|ErrImagePull' | awk '{print $1}' || true)"
+
+  if [ -z "${bad_pods}" ]; then
+    return 0
+  fi
+
+  warn "Found stuck pods in ${namespace} — attempting recovery"
+  for pod in ${bad_pods}; do
+    log "Deleting stuck pod: ${pod}"
+    kubectl delete pod -n "${namespace}" "${pod}" --grace-period=10 2>/dev/null || true
+  done
+
+  sleep 10
 }
 
 # ── Preflight ─────────────────────────────────────────────────────────────
@@ -107,10 +183,20 @@ preflight() {
   done
   ok "Required tools installed"
 
-  if ! minikube status -p minikube >/dev/null 2>&1; then
+  if ! minikube status -p minikube 2>/dev/null | grep -q "Running"; then
     die "minikube not running — run setup.sh first"
   fi
   ok "minikube running"
+
+  # Check GPU is available in the cluster
+  local gpu_count
+  gpu_count="$(kubectl get nodes -o jsonpath='{.items[0].status.allocatable.nvidia\.com/gpu}' 2>/dev/null || echo 0)"
+  if [ "${gpu_count}" -ge 1 ]; then
+    ok "GPU available in cluster: ${gpu_count}"
+  else
+    warn "No GPU allocatable in cluster — vLLM pods will fail to schedule"
+    warn "Run setup.sh to deploy the NVIDIA device plugin"
+  fi
 
   # Check models
   for model_dir in all-MiniLM-L6-v2 bge-base-en-v1.5 Qwen2.5-0.5B-Instruct; do
@@ -138,6 +224,15 @@ deploy_stack() {
 
   if [ "${SKIP_DEPLOY}" = "1" ]; then
     log "Skipping deploy (SKIP_DEPLOY=1)"
+
+    # Even when skipping deploy, check pod health and recover if needed
+    for ns in llm-service llm-d-local; do
+      if ! check_pods_healthy "${ns}"; then
+        warn "Unhealthy pods detected in ${ns}"
+        recover_stuck_pods "${ns}"
+        wait_all_pods_ready "${ns}" 120 || true
+      fi
+    done
     return 0
   fi
 
@@ -163,6 +258,17 @@ ingest_rag() {
     return 0
   fi
 
+  # Ensure port-forwards for Milvus and SeaweedFS S3
+  log "Setting up port-forwards for ingestion"
+  ensure_port_forward "${FASTAPI_NAMESPACE}" milvus "${MILVUS_LOCAL_PORT}" 19530
+  ensure_port_forward "${FASTAPI_NAMESPACE}" seaweed-s3 "${S3_LOCAL_PORT}" 8333
+
+  # Wait for Milvus to be ready
+  log "Waiting for Milvus to be reachable..."
+  if ! wait_http_ok "http://127.0.0.1:${MILVUS_LOCAL_PORT}/healthz" 60; then
+    die "Milvus not reachable on port ${MILVUS_LOCAL_PORT}"
+  fi
+
   # Check if collection already has data
   local row_count=0
   if command -v python3 >/dev/null 2>&1; then
@@ -180,22 +286,11 @@ except:
 
   if [ "${row_count}" -gt 0 ]; then
     ok "Milvus collection already has ${row_count} rows — skipping ingestion"
-    log "To re-ingest, run: SKIP_INGEST=0 FORCE_REINGEST=1 ./deploy.sh"
+    log "To re-ingest, run: FORCE_REINGEST=1 ./deploy.sh"
     if [ "${FORCE_REINGEST:-0}" != "1" ]; then
       return 0
     fi
     log "FORCE_REINGEST=1 — re-ingesting"
-  fi
-
-  # Ensure port-forwards for Milvus and SeaweedFS S3
-  log "Setting up port-forwards for ingestion"
-  start_port_forward "${FASTAPI_NAMESPACE}" milvus "${MILVUS_LOCAL_PORT}" 19530
-  start_port_forward "${FASTAPI_NAMESPACE}" seaweed-s3 "${S3_LOCAL_PORT}" 8333
-
-  # Wait for Milvus to be ready
-  log "Waiting for Milvus to be reachable..."
-  if ! wait_http_ok "http://127.0.0.1:${MILVUS_LOCAL_PORT}/healthz" 60; then
-    die "Milvus not reachable on port ${MILVUS_LOCAL_PORT}"
   fi
 
   # Install Python deps if needed
@@ -229,8 +324,8 @@ except:
 
   # Restart FastAPI so it picks up the new collection data
   log "Restarting FastAPI to pick up ingested data..."
-  kubectl rollout restart deployment/"${FASTAPI_SERVICE}" -n "${FASTAPI_NAMESPACE}"
-  kubectl rollout status deployment/"${FASTAPI_SERVICE}" -n "${FASTAPI_NAMESPACE}" --timeout=120s
+  kubectl rollout restart deployment/"${FASTAPI_DEPLOYMENT}" -n "${FASTAPI_NAMESPACE}"
+  kubectl rollout status deployment/"${FASTAPI_DEPLOYMENT}" -n "${FASTAPI_NAMESPACE}" --timeout=120s
 
   # Re-establish FastAPI port-forward since the pod changed
   start_port_forward "${FASTAPI_NAMESPACE}" "${FASTAPI_SERVICE}" "${FASTAPI_LOCAL_PORT}" 8080
@@ -247,11 +342,9 @@ smoke_test() {
   fi
 
   # Ensure FastAPI port-forward is up
-  if ! curl -sf "http://127.0.0.1:${FASTAPI_LOCAL_PORT}/health" >/dev/null 2>&1; then
-    start_port_forward "${FASTAPI_NAMESPACE}" "${FASTAPI_SERVICE}" "${FASTAPI_LOCAL_PORT}" 8080
-    if ! wait_http_ok "http://127.0.0.1:${FASTAPI_LOCAL_PORT}/health" 30; then
-      die "FastAPI not reachable after deploy"
-    fi
+  ensure_port_forward "${FASTAPI_NAMESPACE}" "${FASTAPI_SERVICE}" "${FASTAPI_LOCAL_PORT}" 8080
+  if ! wait_http_ok "http://127.0.0.1:${FASTAPI_LOCAL_PORT}/health" 30; then
+    die "FastAPI not reachable after deploy"
   fi
 
   # Health check
@@ -272,7 +365,7 @@ smoke_test() {
   model_name="$(echo "${health}" | python3 -c "import sys,json; print(json.load(sys.stdin).get('model','qwen2.5-0.5b'))" 2>/dev/null || echo "qwen2.5-0.5b")"
 
   local resp
-  resp="$(curl -sf "http://127.0.0.1:${FASTAPI_LOCAL_PORT}/v1/chat/completions" \
+  resp="$(curl -sf --max-time 120 "http://127.0.0.1:${FASTAPI_LOCAL_PORT}/v1/chat/completions" \
     -H "Content-Type: application/json" \
     -d "{
       \"model\": \"${model_name}\",
@@ -295,6 +388,11 @@ smoke_test() {
 # ── Summary ──────────────────────────────────────────────────────────────
 print_summary() {
   step "5/5: Ready!"
+
+  # Ensure all three port-forwards are up for the user
+  ensure_port_forward "${FASTAPI_NAMESPACE}" "${FASTAPI_SERVICE}" "${FASTAPI_LOCAL_PORT}" 8080
+  ensure_port_forward "${FASTAPI_NAMESPACE}" milvus "${MILVUS_LOCAL_PORT}" 19530
+  ensure_port_forward "${FASTAPI_NAMESPACE}" seaweed-s3 "${S3_LOCAL_PORT}" 8333
 
   local model_name
   model_name="$(curl -sf "http://127.0.0.1:${FASTAPI_LOCAL_PORT}/health" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('model','qwen2.5-0.5b'))" 2>/dev/null || echo "qwen2.5-0.5b")"
