@@ -306,8 +306,7 @@ download_models() {
   fi
 
   # Check if all models are already present
-  if [ -f "${REPO_ROOT}/all-MiniLM-L6-v2/config.json" ] && \
-     [ -f "${REPO_ROOT}/bge-base-en-v1.5/config.json" ] && \
+  if [ -f "${REPO_ROOT}/bge-base-en-v1.5/config.json" ] && \
      [ -f "${REPO_ROOT}/Qwen2.5-0.5B-Instruct/config.json" ]; then
     ok "All models already present"
     return 0

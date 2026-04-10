@@ -111,8 +111,8 @@ Builds the local `fastapi_runtime_assets/` bundle used by the FastAPI image.
 
 It collects:
 
-* `all-MiniLM-L6-v2`
-* `bge-base-en-v1.5`
+* `bge-base-en-v1.5` (used for both RAG and semantic cache)
+* `all-MiniLM-L6-v2` (optional — only if `BUNDLE_MINILM=1`)
 * tokenizer files from `Qwen2.5-0.5B-Instruct`
 * seed `rag_store_tenants`
 

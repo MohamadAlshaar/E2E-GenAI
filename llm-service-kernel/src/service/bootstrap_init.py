@@ -200,7 +200,7 @@ def ensure_semantic_cache_milvus() -> None:
     milvus_user = _env("SEM_CACHE_MILVUS_USER", "root")
     milvus_password = _env("SEM_CACHE_MILVUS_PASSWORD", "Milvus")
     milvus_secure = _env_bool("SEM_CACHE_MILVUS_SECURE", False)
-    vector_dim = _env_int("SEM_CACHE_VECTOR_DIM", 384)
+    vector_dim = _env_int("SEM_CACHE_VECTOR_DIM", 768)
 
     if not collection_name:
         raise RuntimeError("missing SEM_CACHE_MILVUS_COLLECTION")

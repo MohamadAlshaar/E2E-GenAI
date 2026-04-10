@@ -21,7 +21,7 @@ class SemanticCache:
     def __init__(
         self,
         db_path: str = "semantic_cache.db",
-        embed_model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
+        embed_model_name: str = "BAAI/bge-base-en-v1.5",
         embed_model_path: Optional[str] = None,
         threshold: float = 0.90,
         ttl_seconds: int = 24 * 3600,

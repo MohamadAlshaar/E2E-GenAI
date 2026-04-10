@@ -18,7 +18,8 @@ services:
       - "${SERVICE_PORT:-8080}:8080"
     volumes:
       - ./state:/app/state
-      - ../all-MiniLM-L6-v2:/assets/all-MiniLM-L6-v2:ro
+      # MiniLM no longer required — BGE handles both RAG and semantic cache
+      # - ../all-MiniLM-L6-v2:/assets/all-MiniLM-L6-v2:ro
       - ../rag_store:/assets/rag_store:ro
       - ../docs_RAG:/assets/docs_RAG:ro
     extra_hosts:

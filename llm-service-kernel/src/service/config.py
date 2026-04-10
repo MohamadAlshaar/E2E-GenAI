@@ -201,10 +201,10 @@ class Settings:
 
         self.SEM_CACHE_EMBED_MODEL: str = _env_str(
             "SEM_CACHE_EMBED_MODEL",
-            "sentence-transformers/all-MiniLM-L6-v2",
+            "BAAI/bge-base-en-v1.5",
         )
         self.SEM_CACHE_EMBED_MODEL_PATH: str = _env_str("SEM_CACHE_EMBED_MODEL_PATH", "")
-        self.SEM_CACHE_VECTOR_DIM: int = _env_int("SEM_CACHE_VECTOR_DIM", 384)
+        self.SEM_CACHE_VECTOR_DIM: int = _env_int("SEM_CACHE_VECTOR_DIM", 768)
 
         self.SEM_CACHE_MONGO_URI: str = _env_str(
             "SEM_CACHE_MONGO_URI",

@@ -199,7 +199,7 @@ preflight() {
   fi
 
   # Check models
-  for model_dir in all-MiniLM-L6-v2 bge-base-en-v1.5 Qwen2.5-0.5B-Instruct; do
+  for model_dir in bge-base-en-v1.5 Qwen2.5-0.5B-Instruct; do
     if [ ! -d "${REPO_ROOT}/${model_dir}" ]; then
       die "Model not found: ${REPO_ROOT}/${model_dir} — run setup.sh or scripts/download_models.sh"
     fi

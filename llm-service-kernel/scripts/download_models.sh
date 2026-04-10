@@ -8,7 +8,7 @@
 # Environment overrides:
 #   MODELS_DIR          where to place model dirs (default: repo root)
 #   HF_TOKEN            optional HuggingFace token for gated models
-#   SKIP_MINILM         set to 1 to skip all-MiniLM-L6-v2
+#   DOWNLOAD_MINILM     set to 1 to also download all-MiniLM-L6-v2 (not needed by default)
 #   SKIP_BGE            set to 1 to skip bge-base-en-v1.5
 #   SKIP_QWEN           set to 1 to skip Qwen2.5-0.5B-Instruct
 # ---------------------------------------------------------------------------
@@ -20,7 +20,9 @@ REPO_ROOT="$(cd "${KERNEL_ROOT}/.." && pwd)"
 MODELS_DIR="${MODELS_DIR:-${REPO_ROOT}}"
 HF_TOKEN="${HF_TOKEN:-}"
 
-SKIP_MINILM="${SKIP_MINILM:-0}"
+# MiniLM is no longer required — BGE is used for both RAG and semantic cache.
+# Set DOWNLOAD_MINILM=1 if you want to use MiniLM as the semantic cache model instead.
+DOWNLOAD_MINILM="${DOWNLOAD_MINILM:-0}"
 SKIP_BGE="${SKIP_BGE:-0}"
 SKIP_QWEN="${SKIP_QWEN:-0}"
 
@@ -86,7 +88,9 @@ main() {
   require_python
   ensure_hf_hub
 
-  if [ "${SKIP_MINILM}" != "1" ]; then
+  # MiniLM is optional — only downloaded if explicitly requested.
+  # BGE handles both RAG embeddings and semantic cache by default.
+  if [ "${DOWNLOAD_MINILM}" = "1" ]; then
     download_model "sentence-transformers/all-MiniLM-L6-v2" "${MODELS_DIR}/all-MiniLM-L6-v2" \
       "*.json" "*.txt" "*.safetensors" "*.bin" "1_Pooling/*" "modules.json"
   fi

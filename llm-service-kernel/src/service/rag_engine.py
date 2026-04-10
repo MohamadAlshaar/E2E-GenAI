@@ -19,7 +19,7 @@ class LocalRAG:
         )
         self.embed_model_path = os.getenv(
             "RAG_EMBED_MODEL_PATH",
-            str(repo_root / "all-MiniLM-L6-v2"),
+            str(repo_root / "bge-base-en-v1.5"),
         )
         self.top_k = int(os.getenv("RAG_TOP_K", "4"))
 

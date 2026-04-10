@@ -29,7 +29,7 @@ Total time: ~15 min for setup, ~15 min for deploy (mostly GPU model loading).
 ## Architecture
 
 ```
-Client → FastAPI Orchestrator → Semantic Cache (MiniLM + Milvus + MongoDB)
+Client → FastAPI Orchestrator → Semantic Cache (BGE + Milvus + MongoDB)
                                → RAG Retrieval (BGE + Milvus + SeaweedFS)
                                → LLM Backend (vLLM via llm-d gateway)
 ```
@@ -61,6 +61,28 @@ decode:
 ```
 
 The llm-d gateway routes requests across all workers automatically.
+
+## Semantic Cache Embedding Model
+
+By default, the semantic cache uses **bge-base-en-v1.5** — the same model used for RAG embeddings. This means only two models are downloaded (BGE + Qwen), keeping the setup lighter and faster.
+
+**Optional: using all-MiniLM-L6-v2 instead**
+
+If you prefer a smaller/faster semantic cache model (384-dim vs 768-dim), you can switch to MiniLM:
+
+1. Download MiniLM: `DOWNLOAD_MINILM=1 bash scripts/download_models.sh`
+2. Bundle it into the FastAPI image: `BUNDLE_MINILM=1 bash scripts/prepare_fastapi_runtime_assets.sh`
+3. Edit `deploy/k8s-fastapi/fastapi-configmap.fullstack.yaml`:
+   ```yaml
+   SEM_CACHE_EMBED_MODEL: "sentence-transformers/all-MiniLM-L6-v2"
+   SEM_CACHE_EMBED_MODEL_PATH: "/app/fastapi_runtime_assets/models/all-MiniLM-L6-v2"
+   SEM_CACHE_VECTOR_DIM: "384"
+   ```
+4. Drop the existing semantic cache collection (it will be recreated with the new dimension on next bootstrap):
+   ```bash
+   python3 -c "from pymilvus import connections,utility; connections.connect(uri='http://127.0.0.1:19530'); utility.drop_collection('semcache_direct_v2')"
+   ```
+5. Re-run `./deploy.sh`
 
 ## RAG: Adding Your Own Documents
 
@@ -116,13 +138,14 @@ When `deploy.sh` runs `kubectl apply -f deploy/k8s-storage/milvus.yaml`, Kuberne
 
 ### ML Models
 
-The three ML models are **not baked into Docker images**. They are downloaded from HuggingFace by `scripts/download_models.sh` and then provided to the containers that need them:
+Two ML models are downloaded from HuggingFace by `scripts/download_models.sh` and then provided to the containers that need them:
 
 | Model | Purpose | How It Reaches the Container |
 |---|---|---|
 | **Qwen2.5-0.5B-Instruct** | LLM generation | Copied into minikube's node filesystem at `/data/qwen-model` via `scripts/provision_model_artifacts.sh`, then mounted into the vLLM pod as a PersistentVolume |
-| **bge-base-en-v1.5** | RAG embedding (768-dim) | Bundled into the FastAPI Docker image at build time via `scripts/prepare_fastapi_runtime_assets.sh` |
-| **all-MiniLM-L6-v2** | Semantic cache embedding (384-dim) | Same — bundled into the FastAPI Docker image at build time |
+| **bge-base-en-v1.5** | RAG + semantic cache embedding (768-dim) | Bundled into the FastAPI Docker image at build time via `scripts/prepare_fastapi_runtime_assets.sh` |
+
+Optionally, **all-MiniLM-L6-v2** (384-dim) can be used as an alternative semantic cache model — see [Semantic Cache Embedding Model](#semantic-cache-embedding-model) for details.
 
 ### Helm Charts
 
