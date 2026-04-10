@@ -94,6 +94,57 @@ TENANT_ID=myTenant FORCE_REINGEST=1 ./deploy.sh
 | `TENANT_ID` | `tenantA` | Tenant for RAG ingestion |
 | `FASTAPI_LOCAL_PORT` | `18081` | Local port for FastAPI |
 
+## How Everything Is Packaged and Deployed
+
+Nothing is installed on the host machine directly (except NVIDIA drivers and minikube). Every service runs as a **Docker container** pulled from a public registry, orchestrated by **Kubernetes** (minikube). The repo contains only declarative manifests and Helm charts — Kubernetes reads them, pulls the required images, and starts containers from them automatically.
+
+### Service Images
+
+| Component | Docker Image | Deployed Via | What It Does |
+|---|---|---|---|
+| **Milvus** (vector DB) | `milvusdb/milvus:v2.6.11` | `deploy/k8s-storage/milvus.yaml` | Stores RAG chunks and semantic-cache embeddings as vector collections |
+| **etcd** (Milvus metadata) | `quay.io/coreos/etcd:v3.5.18` | same file | Key-value store that Milvus uses for internal metadata and coordination |
+| **MinIO** (Milvus object store) | `minio/minio:RELEASE.2023-03-20T...` | same file | S3-compatible blob store that Milvus uses for segment storage |
+| **MongoDB** (cache payloads) | `mongo:8` | `deploy/k8s-storage/mongo.yaml` | Stores full cached LLM responses for the semantic cache layer |
+| **SeaweedFS** (RAG chunk store) | `chrislusf/seaweedfs:latest` | `deploy/k8s-storage/seaweedfs.yaml` | S3-compatible object store holding raw PDF text chunks for RAG retrieval (4 pods: master, volume, filer, s3) |
+| **vLLM** (LLM inference) | `ghcr.io/llm-d/llm-d-cuda:v0.6.0` | Helm chart `llm-d-modelservice-v0.4.8.tgz` | GPU-accelerated inference server running the Qwen model, OpenAI-compatible API |
+| **llm-d gateway** (routing) | `ghcr.io/llm-d/llm-d-routing-sidecar:v0.7.1` | Helm chart `llm-d-infra-v1.3.10.tgz` | Routes inference requests across vLLM workers with load balancing |
+| **FastAPI orchestrator** | Built locally from `src/service/` | `deploy/k8s-fastapi/` | The main application — routes queries through semantic cache → RAG → LLM |
+| **Istio** (service mesh) | Public Istio images | Installed by `setup.sh` via `istioctl` | Provides the Gateway API that fronts the llm-d inference endpoint |
+
+When `deploy.sh` runs `kubectl apply -f deploy/k8s-storage/milvus.yaml`, Kubernetes reads the manifest, sees it needs the `milvusdb/milvus:v2.6.11` image, pulls it from Docker Hub, and starts a container from it as a Pod. The same happens for every service — manifests declare what to run, Kubernetes handles the container lifecycle. Helm charts (`.tgz` files) work the same way but with templating — `helm install` renders the templates into Kubernetes manifests and applies them.
+
+### ML Models
+
+The three ML models are **not baked into Docker images**. They are downloaded from HuggingFace by `scripts/download_models.sh` and then provided to the containers that need them:
+
+| Model | Purpose | How It Reaches the Container |
+|---|---|---|
+| **Qwen2.5-0.5B-Instruct** | LLM generation | Copied into minikube's node filesystem at `/data/qwen-model` via `scripts/provision_model_artifacts.sh`, then mounted into the vLLM pod as a PersistentVolume |
+| **bge-base-en-v1.5** | RAG embedding (768-dim) | Bundled into the FastAPI Docker image at build time via `scripts/prepare_fastapi_runtime_assets.sh` |
+| **all-MiniLM-L6-v2** | Semantic cache embedding (384-dim) | Same — bundled into the FastAPI Docker image at build time |
+
+### Helm Charts
+
+The two `.tgz` Helm chart archives in `deploy/llmd-local/` are **pre-packaged and committed to the repo**. They are not downloaded at deploy time. `helm install` reads them directly, renders Kubernetes manifests from the templates inside, and applies them to the cluster.
+
+### What Happens on a Fresh Machine
+
+`setup.sh` prepares the machine:
+1. Installs NVIDIA GPU drivers (if missing)
+2. Installs system dependencies: Docker, NVIDIA Container Toolkit, kubectl, Helm, minikube, Istio
+3. Starts minikube with GPU passthrough and deploys the NVIDIA device plugin
+4. Downloads the 3 ML models from HuggingFace
+5. Downloads sample PDF documents from arxiv
+
+`deploy.sh` deploys the stack:
+1. `kubectl apply` the YAML manifests → Kubernetes pulls Docker images from public registries and starts containers
+2. `helm install` the llm-d charts → same process for the inference gateway and vLLM
+3. Builds the FastAPI Docker image locally inside minikube's Docker daemon
+4. Runs the RAG ingestion pipeline (PDF → embeddings → Milvus + SeaweedFS)
+5. Verifies inference with a smoke test
+6. Sets up port-forwards so you can reach the services from `localhost`
+
 ## Project Layout
 
 ```
