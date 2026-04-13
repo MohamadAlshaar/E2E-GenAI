@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import atexit
 import json
+import os
 import signal
 import subprocess
 import sys
@@ -391,7 +392,7 @@ def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser(description="Interactive test/debug CLI for llm-service-kernel.")
     ap.add_argument("--base-url", default="http://127.0.0.1:18081")
     ap.add_argument("--tenant", default="tenantA")
-    ap.add_argument("--model", default="qwen2.5-0.5b")
+    ap.add_argument("--model", default=os.environ.get("MODEL_NAME", "Qwen2.5-7B-Instruct"))
     ap.add_argument("--max-tokens", type=int, default=128)
     ap.add_argument("--temperature", type=float, default=0.0)
     ap.add_argument("--top-p", type=float, default=1.0)

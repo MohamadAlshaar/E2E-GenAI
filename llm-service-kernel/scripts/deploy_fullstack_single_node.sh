@@ -209,10 +209,20 @@ ensure_istio() {
     die "Istio install completed but istiod did not become ready in time"
   fi
 }
+patch_coredns_memory() {
+  # CoreDNS defaults to 170Mi which is too low when the Istio gateway floods DNS on startup.
+  # This patch raises the limit to 4Gi. Re-applied every deploy because minikube resets it on restart.
+  log "Patching CoreDNS memory limit to 4Gi"
+  kubectl patch deployment coredns -n kube-system --type=merge \
+    -p '{"spec":{"template":{"spec":{"containers":[{"name":"coredns","resources":{"limits":{"memory":"4Gi"}}}]}}}}' \
+    >/dev/null 2>&1 || true
+}
+
 ensure_cluster_prereqs() {
   log "Ensuring cluster prerequisites"
   ensure_gateway_api_crds
   ensure_istio
+  patch_coredns_memory
 }
 
 apply_storage_manifests() {
@@ -253,7 +263,7 @@ apply_fastapi_resources() {
 
   kubectl apply -f "${KERNEL_ROOT}/deploy/k8s-fastapi/rag-store-tenants-pvc.yaml"
   kubectl apply -f "${KERNEL_ROOT}/deploy/k8s-fastapi/tenant-ingest-input-pvc.yaml"
-  kubectl apply -f "${KERNEL_ROOT}/deploy/k8s-fastapi/fastapi-configmap.fullstack.yaml"
+  envsubst < "${KERNEL_ROOT}/deploy/k8s-fastapi/fastapi-configmap.fullstack.yaml" | kubectl apply -f -
   kubectl apply -f "${KERNEL_ROOT}/deploy/k8s-fastapi/fastapi-secret.fullstack.yaml"
   kubectl apply -f "${KERNEL_ROOT}/deploy/k8s-fastapi/fastapi-service.yaml"
 }
@@ -370,6 +380,7 @@ main() {
   require_cmd minikube
   require_cmd docker
   require_cmd python3
+  require_cmd envsubst
 
   if [ "${INSTALL_CLUSTER_PREREQS}" = "1" ]; then
     ensure_cluster_prereqs

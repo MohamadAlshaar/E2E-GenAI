@@ -11,10 +11,10 @@ routing:
 
   inferencePool:
     create: true
-    name: ms-local-qwen-pool
+    name: ms-local-model-pool
     targetPortNumber: 8000
     modelServerType: vllm
-    modelName: qwen2.5-0.5b
+    modelName: ${MODEL_NAME}
     modelServers:
       matchLabels:
         llm-d.ai/inference-serving: "true"

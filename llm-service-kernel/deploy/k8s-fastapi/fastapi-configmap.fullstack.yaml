@@ -12,7 +12,7 @@ data:
   GENERATION_API_MODE: "completions"
   GENERATION_CHAT_PATH: "/v1/chat/completions"
   GENERATION_COMPLETIONS_PATH: "/v1/completions"
-  GENERATION_MODEL_NAME: "qwen2.5-0.5b"
+  GENERATION_MODEL_NAME: "${MODEL_NAME}"
   MODEL_SERVER_TIMEOUT_S: "300.0"
 
   CACHE_SCOPE: "minikube-dev"
@@ -71,7 +71,7 @@ data:
   KB_VERSION: "no-rag"
   SYSTEM_PROMPT_VERSION: "v1"
 
-  TOKENIZER_PATH: "/app/fastapi_runtime_assets/models/Qwen2.5-0.5B-Instruct"
+  TOKENIZER_PATH: "/app/fastapi_runtime_assets/models/${MODEL_NAME}"
   TOKENIZER_LOCAL_ONLY: "1"
 
   BENCHMARK_SHADOW_MODE: "0"

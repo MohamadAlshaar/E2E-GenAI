@@ -29,6 +29,12 @@ KERNEL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${KERNEL_ROOT}/.." && pwd)"
 SCRIPTS_DIR="${KERNEL_ROOT}/scripts"
 
+# ── Load model config (single source of truth) ───────────────────────────────
+MODEL_ENV="${KERNEL_ROOT}/deploy/model.env"
+[ -f "${MODEL_ENV}" ] || { echo "ERROR: deploy/model.env not found" >&2; exit 1; }
+# shellcheck source=deploy/model.env
+set -a; source "${MODEL_ENV}"; set +a
+
 SKIP_NVIDIA_DRIVER="${SKIP_NVIDIA_DRIVER:-0}"
 SKIP_HOST_BOOTSTRAP="${SKIP_HOST_BOOTSTRAP:-0}"
 SKIP_MINIKUBE_START="${SKIP_MINIKUBE_START:-0}"
@@ -307,7 +313,7 @@ download_models() {
 
   # Check if all models are already present
   if [ -f "${REPO_ROOT}/bge-base-en-v1.5/config.json" ] && \
-     [ -f "${REPO_ROOT}/Qwen2.5-0.5B-Instruct/config.json" ]; then
+     [ -f "${REPO_ROOT}/${MODEL_NAME}/config.json" ]; then
     ok "All models already present"
     return 0
   fi

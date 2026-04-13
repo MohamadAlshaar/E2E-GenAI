@@ -21,16 +21,20 @@
 #   S3_LOCAL_PORT          local port for SeaweedFS S3 (default: 8333)
 #
 # Model / worker configuration (preserved for easy changes):
-#   GENERATION_MODEL_NAME  model name served by vLLM (default: qwen2.5-0.5b)
-#   QWEN_HF_REPO          HuggingFace repo for the LLM (for download_models.sh)
-#   See deploy/llmd-local/modelservice-values.yaml for vLLM worker config
-#   See deploy/k8s-fastapi/fastapi-configmap.fullstack.yaml for service config
+#   To change the model: edit deploy/model.env (MODEL_NAME, MODEL_HF_REPO, VLLM_* settings)
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
 KERNEL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${KERNEL_ROOT}/.." && pwd)"
 SCRIPTS_DIR="${KERNEL_ROOT}/scripts"
+
+# ── Load model config (single source of truth) ───────────────────────────────
+MODEL_ENV="${KERNEL_ROOT}/deploy/model.env"
+[ -f "${MODEL_ENV}" ] || { echo "ERROR: deploy/model.env not found" >&2; exit 1; }
+# shellcheck source=deploy/model.env
+# export so envsubst and child scripts can see all vars
+set -a; source "${MODEL_ENV}"; set +a
 
 SKIP_DEPLOY="${SKIP_DEPLOY:-0}"
 SKIP_INGEST="${SKIP_INGEST:-0}"
@@ -199,7 +203,7 @@ preflight() {
   fi
 
   # Check models
-  for model_dir in bge-base-en-v1.5 Qwen2.5-0.5B-Instruct; do
+  for model_dir in bge-base-en-v1.5 "${MODEL_NAME}"; do
     if [ ! -d "${REPO_ROOT}/${model_dir}" ]; then
       die "Model not found: ${REPO_ROOT}/${model_dir} — run setup.sh or scripts/download_models.sh"
     fi
@@ -269,6 +273,32 @@ ingest_rag() {
   if ! wait_http_ok "http://127.0.0.1:9091/healthz" 60; then
     die "Milvus not reachable on port 9091"
   fi
+
+  # Wait for Milvus internal components (querynode) to be fully registered
+  log "Waiting for Milvus query node to be ready..."
+  local milvus_ready=0
+  local deadline=$((SECONDS + 120))
+  while [ "${SECONDS}" -lt "${deadline}" ]; do
+    local qn_count
+    qn_count="$(python3 -c "
+try:
+    from pymilvus import MilvusClient
+    c = MilvusClient(uri='http://127.0.0.1:${MILVUS_LOCAL_PORT}', token='root:Milvus')
+    c.list_collections()
+    print('ok')
+except Exception as e:
+    print('fail:' + str(e))
+" 2>/dev/null || echo fail)"
+    if [ "${qn_count}" = "ok" ]; then
+      milvus_ready=1
+      break
+    fi
+    sleep 5
+  done
+  if [ "${milvus_ready}" = "0" ]; then
+    die "Milvus query node did not become ready in time"
+  fi
+  ok "Milvus fully ready"
 
   # Check if collection already has data
   local row_count=0
@@ -363,7 +393,7 @@ smoke_test() {
   # Quick inference test
   log "Testing inference..."
   local model_name
-  model_name="$(echo "${health}" | python3 -c "import sys,json; print(json.load(sys.stdin).get('model','qwen2.5-0.5b'))" 2>/dev/null || echo "qwen2.5-0.5b")"
+  model_name="$(echo "${health}" | python3 -c "import sys,json; print(json.load(sys.stdin).get('model',"${MODEL_NAME}"))" 2>/dev/null || echo "${MODEL_NAME}")"
 
   local resp
   resp="$(curl -sf --max-time 120 "http://127.0.0.1:${FASTAPI_LOCAL_PORT}/v1/chat/completions" \
@@ -396,7 +426,7 @@ print_summary() {
   ensure_port_forward "${FASTAPI_NAMESPACE}" seaweed-s3 "${S3_LOCAL_PORT}" 8333
 
   local model_name
-  model_name="$(curl -sf "http://127.0.0.1:${FASTAPI_LOCAL_PORT}/health" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('model','qwen2.5-0.5b'))" 2>/dev/null || echo "qwen2.5-0.5b")"
+  model_name="$(curl -sf "http://127.0.0.1:${FASTAPI_LOCAL_PORT}/health" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('model',"${MODEL_NAME}"))" 2>/dev/null || echo "${MODEL_NAME}")"
 
   echo
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -419,9 +449,8 @@ print_summary() {
   echo "    Milvus       → http://127.0.0.1:${MILVUS_LOCAL_PORT}"
   echo "    SeaweedFS S3 → http://127.0.0.1:${S3_LOCAL_PORT}"
   echo
-  echo "  To change the LLM model or add workers:"
-  echo "    Edit deploy/llmd-local/modelservice-values.yaml"
-  echo "    Edit deploy/k8s-fastapi/fastapi-configmap.fullstack.yaml"
+  echo "  To change the LLM model:"
+  echo "    Edit deploy/model.env  (MODEL_NAME, VLLM_MAX_MODEL_LEN, VLLM_GPU_MEMORY_UTILIZATION, etc.)"
   echo "    Re-run: ./deploy.sh"
   echo
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

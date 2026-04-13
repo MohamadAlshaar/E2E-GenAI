@@ -24,22 +24,39 @@ spec:
                 name: llm-service-kernel-config-fullstack
             - secretRef:
                 name: llm-service-kernel-secret
+          resources:
+            requests:
+              memory: "2Gi"
+              cpu: "1"
+            limits:
+              memory: "6Gi"
           volumeMounts:
             - name: rag-store-tenants
               mountPath: /rag_store_tenants
               readOnly: true
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 120
+            timeoutSeconds: 15
           readinessProbe:
             httpGet:
               path: /health
               port: 8080
-            initialDelaySeconds: 8
-            periodSeconds: 5
+            initialDelaySeconds: 0
+            periodSeconds: 10
+            timeoutSeconds: 15
           livenessProbe:
             httpGet:
               path: /health
               port: 8080
-            initialDelaySeconds: 20
-            periodSeconds: 10
+            initialDelaySeconds: 120
+            periodSeconds: 60
+            timeoutSeconds: 45
+            failureThreshold: 5
       volumes:
         - name: rag-store-tenants
           persistentVolumeClaim:

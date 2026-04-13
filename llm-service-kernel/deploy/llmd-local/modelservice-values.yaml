@@ -2,7 +2,7 @@ multinode: false
 
 modelArtifacts:
   uri: "pvc://qwen-model-pvc"
-  name: "qwen2.5-0.5b"
+  name: "${MODEL_NAME}"
 
 routing:
   servicePort: 8000
@@ -78,9 +78,9 @@ decode:
           exec vllm serve /model-cache \
             --host 0.0.0.0 \
             --port 8200 \
-            --served-model-name qwen2.5-0.5b \
-            --max-model-len 2048 \
-            --gpu-memory-utilization 0.85 \
+            --served-model-name ${MODEL_NAME} \
+            --max-model-len ${VLLM_MAX_MODEL_LEN} \
+            --gpu-memory-utilization ${VLLM_GPU_MEMORY_UTILIZATION} \
             --enforce-eager
       env:
         - name: VLLM_LOGGING_LEVEL
@@ -97,11 +97,11 @@ decode:
         limits:
           nvidia.com/gpu: "1"
           cpu: "8"
-          memory: 20Gi
+          memory: ${VLLM_MEMORY_LIMIT}
         requests:
           nvidia.com/gpu: "1"
           cpu: "4"
-          memory: 12Gi
+          memory: ${VLLM_MEMORY_REQUEST}
       mountModelVolume: true
       volumeMounts:
         - name: metrics-volume

@@ -10,12 +10,19 @@
 #   HF_TOKEN            optional HuggingFace token for gated models
 #   DOWNLOAD_MINILM     set to 1 to also download all-MiniLM-L6-v2 (not needed by default)
 #   SKIP_BGE            set to 1 to skip bge-base-en-v1.5
-#   SKIP_QWEN           set to 1 to skip Qwen2.5-0.5B-Instruct
+#   SKIP_LLM            set to 1 to skip the LLM download (MODEL_NAME from deploy/model.env)
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
 KERNEL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_ROOT="$(cd "${KERNEL_ROOT}/.." && pwd)"
+
+# ── Load model config (single source of truth) ───────────────────────────────
+MODEL_ENV="${KERNEL_ROOT}/deploy/model.env"
+if [ -f "${MODEL_ENV}" ]; then
+  # shellcheck source=deploy/model.env
+  set -a; source "${MODEL_ENV}"; set +a
+fi
 
 MODELS_DIR="${MODELS_DIR:-${REPO_ROOT}}"
 HF_TOKEN="${HF_TOKEN:-}"
@@ -24,7 +31,7 @@ HF_TOKEN="${HF_TOKEN:-}"
 # Set DOWNLOAD_MINILM=1 if you want to use MiniLM as the semantic cache model instead.
 DOWNLOAD_MINILM="${DOWNLOAD_MINILM:-0}"
 SKIP_BGE="${SKIP_BGE:-0}"
-SKIP_QWEN="${SKIP_QWEN:-0}"
+SKIP_LLM="${SKIP_LLM:-0}"
 
 log() { printf '[download_models] %s\n' "$*"; }
 die() { printf '[download_models] ERROR: %s\n' "$*" >&2; exit 1; }
@@ -100,8 +107,10 @@ main() {
       "*.json" "*.txt" "*.safetensors" "*.bin" "1_Pooling/*" "modules.json"
   fi
 
-  if [ "${SKIP_QWEN}" != "1" ]; then
-    download_model "Qwen/Qwen2.5-0.5B-Instruct" "${MODELS_DIR}/Qwen2.5-0.5B-Instruct" \
+  if [ "${SKIP_LLM}" != "1" ]; then
+    local llm_repo="${MODEL_HF_REPO:-Qwen/Qwen2.5-7B-Instruct}"
+    local llm_dir="${MODELS_DIR}/${MODEL_NAME:-Qwen2.5-7B-Instruct}"
+    download_model "${llm_repo}" "${llm_dir}" \
       "*.json" "*.txt" "*.safetensors" "*.bin" "merges.txt"
   fi
 

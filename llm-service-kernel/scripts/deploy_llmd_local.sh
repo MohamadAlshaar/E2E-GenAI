@@ -4,6 +4,14 @@ set -euo pipefail
 KERNEL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LLMD_DIR="${KERNEL_ROOT}/deploy/llmd-local"
 
+# ── Load model config (single source of truth) ───────────────────────────────
+# Vars exported here are also inherited by child processes (provision_model_artifacts.sh etc.)
+MODEL_ENV="${KERNEL_ROOT}/deploy/model.env"
+if [ -f "${MODEL_ENV}" ]; then
+  # shellcheck source=deploy/model.env
+  set -a; source "${MODEL_ENV}"; set +a
+fi
+
 MINIKUBE_PROFILE="${MINIKUBE_PROFILE:-minikube}"
 NAMESPACE="${NAMESPACE:-llm-d-local}"
 
@@ -49,6 +57,7 @@ require_cmd minikube
 require_cmd docker
 require_cmd kubectl
 require_cmd helm
+require_cmd envsubst
 
 [ -d "${LLMD_DIR}" ] || die "llm-d directory not found: ${LLMD_DIR}"
 [ -f "${LLMD_DIR}/llm-d-infra-v1.3.10.tgz" ] || die "missing chart: ${LLMD_DIR}/llm-d-infra-v1.3.10.tgz"
@@ -99,9 +108,41 @@ helm upgrade --install "${INFRA_RELEASE}" "${LLMD_DIR}/llm-d-infra-v1.3.10.tgz" 
   --create-namespace
 
 log "Installing llm-d model service"
+_MS_VALUES_TMP="$(mktemp /tmp/modelservice-values-rendered.XXXXXX.yaml)"
+envsubst < "${LLMD_DIR}/modelservice-values.yaml" > "${_MS_VALUES_TMP}"
 helm upgrade --install "${MODEL_RELEASE}" "${LLMD_DIR}/llm-d-modelservice-v0.4.8.tgz" \
   -n "${NAMESPACE}" \
-  -f "${LLMD_DIR}/modelservice-values.yaml"
+  -f "${_MS_VALUES_TMP}"
+rm -f "${_MS_VALUES_TMP}"
+
+log "Patching Istio gateway: static istiod IP via hostAliases to avoid CoreDNS flood"
+ISTIOD_IP="$(kubectl get svc istiod -n istio-system -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)"
+if [ -n "${ISTIOD_IP}" ]; then
+  kubectl patch deployment -n "${NAMESPACE}" "${INFRA_DEPLOYMENT}" --type=json -p="[
+    {\"op\":\"add\",\"path\":\"/spec/template/spec/hostAliases\",\"value\":[
+      {\"ip\":\"${ISTIOD_IP}\",\"hostnames\":[\"istiod.istio-system.svc\",\"istiod.istio-system.svc.cluster.local\"]}
+    ]},
+    {\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/env/1/value\",\"value\":\"${ISTIOD_IP}:15012\"}
+  ]" >/dev/null || true
+  log "Gateway patched with istiod IP ${ISTIOD_IP}"
+
+  # Also create a ProxyConfig so Istio controller respects the CA_ADDR override
+  kubectl apply -f - <<PROXYEOF
+apiVersion: networking.istio.io/v1beta1
+kind: ProxyConfig
+metadata:
+  name: gateway-static-istiod
+  namespace: ${NAMESPACE}
+spec:
+  selector:
+    matchLabels:
+      gateway.networking.k8s.io/gateway-name: infra-local-inference-gateway
+  environmentVariables:
+    CA_ADDR: "${ISTIOD_IP}:15012"
+PROXYEOF
+else
+  log "WARNING: could not resolve istiod ClusterIP — gateway may have DNS issues on startup"
+fi
 
 log "Enforcing single-GPU safe rollout strategy on decode deployment"
 kubectl patch deployment -n "${NAMESPACE}" "${MODEL_DEPLOYMENT}" \

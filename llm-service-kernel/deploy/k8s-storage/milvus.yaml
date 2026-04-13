@@ -65,13 +65,25 @@ spec:
             - /etcd
           env:
             - name: ETCD_AUTO_COMPACTION_MODE
-              value: revision
+              value: periodic
             - name: ETCD_AUTO_COMPACTION_RETENTION
-              value: "1000"
+              value: "1h"
             - name: ETCD_QUOTA_BACKEND_BYTES
               value: "4294967296"
             - name: ETCD_SNAPSHOT_COUNT
               value: "50000"
+            - name: ETCD_HEARTBEAT_INTERVAL
+              value: "500"
+            - name: ETCD_ELECTION_TIMEOUT
+              value: "5000"
+            - name: ETCD_UNSAFE_NO_FSYNC
+              value: "true"
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "1Gi"
           ports:
             - containerPort: 2379
           volumeMounts:
@@ -84,8 +96,7 @@ spec:
             periodSeconds: 5
       volumes:
         - name: etcd-data
-          persistentVolumeClaim:
-            claimName: milvus-etcd-pvc
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
@@ -100,6 +111,20 @@ spec:
       port: 2379
       targetPort: 2379
   type: ClusterIP
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: milvus-user-config
+  namespace: llm-service
+data:
+  user.yaml: |
+    etcd:
+      requestTimeout: 60000
+    common:
+      session:
+        ttl: 120
+        retryTimes: 30
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -133,15 +158,21 @@ spec:
           ports:
             - containerPort: 9000
             - containerPort: 9001
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "2Gi"
           volumeMounts:
             - name: minio-data
               mountPath: /minio_data
           readinessProbe:
-            httpGet:
-              path: /minio/health/live
+            tcpSocket:
               port: 9000
             initialDelaySeconds: 10
             periodSeconds: 10
+            timeoutSeconds: 5
       volumes:
         - name: minio-data
           persistentVolumeClaim:
@@ -171,6 +202,8 @@ metadata:
   namespace: llm-service
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: milvus
@@ -184,49 +217,92 @@ spec:
           image: busybox:1.36
           imagePullPolicy: IfNotPresent
           command: ['sh', '-c', 'until nc -z milvus-etcd 2379; do echo "waiting for etcd"; sleep 2; done']
+        - name: clear-stale-sessions
+          image: quay.io/coreos/etcd:v3.5.18
+          imagePullPolicy: IfNotPresent
+          command:
+            - etcdctl
+            - --endpoints=http://milvus-etcd:2379
+            - del
+            - --prefix
+            - by-dev/meta/session/
+          env:
+            - name: ETCDCTL_API
+              value: "3"
         - name: wait-for-minio
           image: busybox:1.36
           imagePullPolicy: IfNotPresent
           command: ['sh', '-c', 'until nc -z milvus-minio 9000; do echo "waiting for minio"; sleep 2; done']
       containers:
         - name: milvus
-          image: milvusdb/milvus:v2.6.11
+          image: milvusdb/milvus:v2.5.12
           imagePullPolicy: IfNotPresent
           command: ["milvus", "run", "standalone"]
           securityContext:
             seccompProfile:
               type: Unconfined
+          resources:
+            requests:
+              memory: "4Gi"
+              cpu: "1"
+            limits:
+              memory: "10Gi"
           env:
             - name: ETCD_ENDPOINTS
               value: milvus-etcd:2379
             - name: MINIO_ADDRESS
               value: milvus-minio:9000
-            - name: MQ_TYPE
-              value: woodpecker
+            - name: MINIO_ACCESS_KEY_ID
+              value: minioadmin
+            - name: MINIO_SECRET_ACCESS_KEY
+              value: minioadmin
           ports:
             - containerPort: 19530
             - containerPort: 9091
           volumeMounts:
             - name: milvus-data
               mountPath: /var/lib/milvus
+            - name: milvus-rdb-mem
+              mountPath: /var/lib/milvus/rdb_data
+            - name: milvus-rdb-meta-mem
+              mountPath: /var/lib/milvus/rdb_data_meta_kv
+            - name: milvus-config
+              mountPath: /milvus/configs/user.yaml
+              subPath: user.yaml
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 9091
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 40
+            timeoutSeconds: 30
           readinessProbe:
             httpGet:
               path: /healthz
               port: 9091
-            initialDelaySeconds: 90
-            periodSeconds: 10
-            timeoutSeconds: 5
+            initialDelaySeconds: 0
+            periodSeconds: 15
+            timeoutSeconds: 30
+            failureThreshold: 5
           livenessProbe:
             httpGet:
               path: /healthz
               port: 9091
             initialDelaySeconds: 120
-            periodSeconds: 15
-            timeoutSeconds: 5
+            periodSeconds: 30
+            timeoutSeconds: 30
+            failureThreshold: 5
       volumes:
         - name: milvus-data
-          persistentVolumeClaim:
-            claimName: milvus-data-pvc
+          emptyDir: {}
+        - name: milvus-rdb-mem
+          emptyDir: {}
+        - name: milvus-rdb-meta-mem
+          emptyDir: {}
+        - name: milvus-config
+          configMap:
+            name: milvus-user-config
 ---
 apiVersion: v1
 kind: Service

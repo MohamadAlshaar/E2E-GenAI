@@ -145,7 +145,7 @@ class Settings:
         self.GENERATION_MODEL_NAME: str = _env_first_str(
             "GENERATION_MODEL_NAME",
             "SERVED_MODEL_NAME",
-            default="qwen2.5-0.5b",
+            default="",
         )
 
         generation_base_url = _env_str("GENERATION_BASE_URL", "").rstrip("/")

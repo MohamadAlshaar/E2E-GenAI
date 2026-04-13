@@ -13,12 +13,12 @@ PYTHON_BIN="${PYTHON_BIN:-python3}"
 BUNDLE_MINILM="${BUNDLE_MINILM:-0}"
 MINILM_LOCAL_SRC="${MINILM_LOCAL_SRC:-${REPO_ROOT}/all-MiniLM-L6-v2}"
 BGE_LOCAL_SRC="${BGE_LOCAL_SRC:-${REPO_ROOT}/bge-base-en-v1.5}"
-QWEN_LOCAL_SRC="${QWEN_LOCAL_SRC:-${REPO_ROOT}/Qwen2.5-0.5B-Instruct}"
+QWEN_LOCAL_SRC="${QWEN_LOCAL_SRC:-${REPO_ROOT}/${MODEL_NAME:-Qwen2.5-7B-Instruct}}"
 RAG_SEED_LOCAL_SRC="${RAG_SEED_LOCAL_SRC:-${REPO_ROOT}/rag_store_tenants}"
 
 MINILM_HF_REPO="${MINILM_HF_REPO:-sentence-transformers/all-MiniLM-L6-v2}"  # only used when BUNDLE_MINILM=1
 BGE_HF_REPO="${BGE_HF_REPO:-BAAI/bge-base-en-v1.5}"
-QWEN_HF_REPO="${QWEN_HF_REPO:-Qwen/Qwen2.5-0.5B-Instruct}"
+QWEN_HF_REPO="${QWEN_HF_REPO:-${MODEL_HF_REPO:-Qwen/Qwen2.5-7B-Instruct}}"
 
 TMP_DIR="${KERNEL_ROOT}/.tmp_runtime_assets"
 
@@ -67,7 +67,7 @@ prepare_dirs() {
   rm -rf "${OUT_DIR}" "${TMP_DIR}"
   mkdir -p \
     "${OUT_DIR}/models/bge-base-en-v1.5" \
-    "${OUT_DIR}/models/Qwen2.5-0.5B-Instruct" \
+    "${OUT_DIR}/models/${MODEL_NAME:-Qwen2.5-7B-Instruct}" \
     "${OUT_DIR}/rag_store_tenants" \
     "${TMP_DIR}"
   if [ "${BUNDLE_MINILM}" = "1" ]; then
@@ -138,7 +138,7 @@ copy_model_bge_from_dir() {
 
 copy_qwen_tokenizer_from_dir() {
   local src="$1"
-  local dst="${OUT_DIR}/models/Qwen2.5-0.5B-Instruct"
+  local dst="${OUT_DIR}/models/${MODEL_NAME:-Qwen2.5-7B-Instruct}"
 
   [ -d "${src}" ] || die "Qwen tokenizer source dir not found: ${src}"
 
@@ -206,7 +206,7 @@ use_online_assets() {
   log "Using online asset download mode"
 
   local bge_tmp="${TMP_DIR}/bge-base-en-v1.5"
-  local qwen_tmp="${TMP_DIR}/Qwen2.5-0.5B-Instruct"
+  local qwen_tmp="${TMP_DIR}/${MODEL_NAME:-Qwen2.5-7B-Instruct}"
 
   if [ "${BUNDLE_MINILM}" = "1" ]; then
     local minilm_tmp="${TMP_DIR}/all-MiniLM-L6-v2"
@@ -260,7 +260,7 @@ validate_outputs() {
   fi
   test -f "${OUT_DIR}/models/bge-base-en-v1.5/config.json" \
     || die "Missing BGE config.json in output"
-  test -f "${OUT_DIR}/models/Qwen2.5-0.5B-Instruct/tokenizer.json" \
+  test -f "${OUT_DIR}/models/${MODEL_NAME:-Qwen2.5-7B-Instruct}/tokenizer.json" \
     || die "Missing Qwen tokenizer.json in output"
 }
 

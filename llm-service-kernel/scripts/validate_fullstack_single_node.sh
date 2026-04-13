@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+KERNEL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+MODEL_ENV="${KERNEL_ROOT}/deploy/model.env"
+if [ -f "${MODEL_ENV}" ]; then set -a; source "${MODEL_ENV}"; set +a; fi
+
 LLMD_NAMESPACE="${LLMD_NAMESPACE:-llm-d-local}"
 FASTAPI_NAMESPACE="${FASTAPI_NAMESPACE:-llm-service}"
 
@@ -13,7 +17,7 @@ FASTAPI_LOCAL_PORT="${FASTAPI_LOCAL_PORT:-18081}"
 LLMD_BASE_URL="${LLMD_BASE_URL:-http://127.0.0.1:${LLMD_LOCAL_PORT}}"
 FASTAPI_BASE_URL="${FASTAPI_BASE_URL:-http://127.0.0.1:${FASTAPI_LOCAL_PORT}}"
 
-MODEL_NAME="${MODEL_NAME:-qwen2.5-0.5b}"
+MODEL_NAME="${MODEL_NAME:-Qwen2.5-7B-Instruct}"
 LLMD_API_MODE="${LLMD_API_MODE:-completions}"
 
 AUTO_PORT_FORWARD="${AUTO_PORT_FORWARD:-1}"

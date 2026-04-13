@@ -14,7 +14,7 @@ from typing import Any
 FASTAPI_BASE_URL = os.getenv("FASTAPI_BASE_URL", "http://127.0.0.1:18081").rstrip("/")
 LLMD_BASE_URL = os.getenv("LLMD_BASE_URL", "").rstrip("/")
 LLMD_API_MODE = os.getenv("LLMD_API_MODE", "completions").strip().lower()
-MODEL_NAME = os.getenv("MODEL_NAME", "qwen2.5-0.5b")
+MODEL_NAME = os.getenv("MODEL_NAME", "")
 HTTP_TIMEOUT_S = float(os.getenv("HTTP_TIMEOUT_S", "30"))
 RAG_TEST_PROMPT = os.getenv("RAG_TEST_PROMPT", "What does tenantA say about StarNUMA?")
 NEGATIVE_RAG_PROMPT = os.getenv("NEGATIVE_RAG_PROMPT", "What is 2 plus 2?")

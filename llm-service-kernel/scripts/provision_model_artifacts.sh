@@ -5,7 +5,7 @@ KERNEL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_ROOT="$(cd "${KERNEL_ROOT}/.." && pwd)"
 
 MINIKUBE_PROFILE="${MINIKUBE_PROFILE:-minikube}"
-MODEL_SOURCE_DIR="${MODEL_SOURCE_DIR:-${REPO_ROOT}/Qwen2.5-0.5B-Instruct}"
+MODEL_SOURCE_DIR="${MODEL_SOURCE_DIR:-${REPO_ROOT}/${MODEL_NAME:-Qwen2.5-7B-Instruct}}"
 MODEL_TARGET_DIR="${MODEL_TARGET_DIR:-/data/qwen-model}"
 RESET_TARGET="${RESET_TARGET:-0}"
 
@@ -38,10 +38,15 @@ require_cmd tar
 
 [ -d "${MODEL_SOURCE_DIR}" ] || die "model source directory not found: ${MODEL_SOURCE_DIR}"
 [ -f "${MODEL_SOURCE_DIR}/config.json" ] || die "missing file: ${MODEL_SOURCE_DIR}/config.json"
-[ -f "${MODEL_SOURCE_DIR}/model.safetensors" ] || die "missing file: ${MODEL_SOURCE_DIR}/model.safetensors"
+[ -f "${MODEL_SOURCE_DIR}/model.safetensors" ] || [ -f "${MODEL_SOURCE_DIR}/model.safetensors.index.json" ] || die "missing file: ${MODEL_SOURCE_DIR}/model.safetensors (or sharded equivalent)"
 
 log "Using source model directory: ${MODEL_SOURCE_DIR}"
 log "Target node directory: ${MODEL_TARGET_DIR}"
+
+if [ "${RESET_TARGET}" != "1" ] && minikube -p "${MINIKUBE_PROFILE}" ssh -- "sudo test -f '${MODEL_TARGET_DIR}/config.json' && { sudo test -f '${MODEL_TARGET_DIR}/model.safetensors' || sudo test -f '${MODEL_TARGET_DIR}/model.safetensors.index.json'; }" 2>/dev/null; then
+  log "Model already exists on node at ${MODEL_TARGET_DIR}, skipping provisioning (set RESET_TARGET=1 to force)"
+  exit 0
+fi
 
 if [ "${RESET_TARGET}" = "1" ]; then
   log "Resetting target directory on minikube node"
@@ -60,6 +65,6 @@ log "Extracting archive on minikube node"
 minikube -p "${MINIKUBE_PROFILE}" ssh -- "sudo tar -xzf '${NODE_TMP_ARCHIVE}' -C '${MODEL_TARGET_DIR}'"
 
 log "Verifying copied files"
-minikube -p "${MINIKUBE_PROFILE}" ssh -- "sudo test -f '${MODEL_TARGET_DIR}/config.json' && sudo test -f '${MODEL_TARGET_DIR}/model.safetensors' && sudo du -sh '${MODEL_TARGET_DIR}' && sudo ls -lah '${MODEL_TARGET_DIR}' | head -20"
+minikube -p "${MINIKUBE_PROFILE}" ssh -- "sudo test -f '${MODEL_TARGET_DIR}/config.json' && { sudo test -f '${MODEL_TARGET_DIR}/model.safetensors' || sudo test -f '${MODEL_TARGET_DIR}/model.safetensors.index.json'; } && sudo du -sh '${MODEL_TARGET_DIR}' && sudo ls -lah '${MODEL_TARGET_DIR}' | head -20"
 
 log "Model provisioning complete"

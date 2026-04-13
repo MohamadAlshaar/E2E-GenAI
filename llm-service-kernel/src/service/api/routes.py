@@ -21,7 +21,15 @@ def _current_checks(request: Request) -> dict:
     runtime = getattr(request.app.state, "runtime", None)
     if runtime is None:
         return getattr(request.app.state, "startup_checks", {}) or {}
+    # Return cached checks — do not refresh on every probe (refresh_startup_checks
+    # makes blocking network calls that freeze the event loop and cause liveness timeouts)
+    return getattr(runtime, "startup_checks", {}) or {}
 
+
+def _refreshed_checks(request: Request) -> dict:
+    runtime = getattr(request.app.state, "runtime", None)
+    if runtime is None:
+        return getattr(request.app.state, "startup_checks", {}) or {}
     checks = refresh_startup_checks(runtime)
     request.app.state.startup_checks = checks
     return checks
@@ -100,7 +108,7 @@ async def health(request: Request):
 
 @router.get("/ready")
 async def ready(request: Request):
-    startup_checks = _current_checks(request)
+    startup_checks = _refreshed_checks(request)
     ready_status = startup_checks.get("ready_status", {}) or {}
     status_code = 200 if bool(ready_status.get("ok")) else 503
 
