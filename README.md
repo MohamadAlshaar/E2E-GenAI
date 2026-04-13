@@ -20,8 +20,8 @@ Total time: ~15 min for setup, ~15 min for deploy (mostly GPU model loading).
 
 ## Prerequisites
 
-- Ubuntu 22.04+ with **NVIDIA GPU** (24GB+ VRAM recommended for 7B models)
-- 32GB+ RAM, 8+ CPU cores, 80GB+ disk
+- Ubuntu 22.04+ with **NVIDIA GPU** and driver installed (`nvidia-smi` must work)
+- 16GB+ RAM, 8+ CPU cores, 80GB+ disk
 - Internet access (for model download on first setup)
 
 `setup.sh` handles everything else: Docker, NVIDIA Container Toolkit, minikube, kubectl, Helm, Istio, ML models, sample documents.
@@ -41,32 +41,14 @@ All components run on a single minikube node across 3 namespaces:
 
 ## Changing the LLM Model
 
-All model configuration lives in one file: **`deploy/model.env`**
-
-```bash
-# deploy/model.env
-MODEL_NAME="Qwen2.5-7B-Instruct"       # must match the directory name under repo root
-MODEL_HF_REPO="Qwen/Qwen2.5-7B-Instruct"  # HuggingFace repo to download from
-
-VLLM_MAX_MODEL_LEN=32768               # max context length (reduce to save GPU VRAM)
-VLLM_GPU_MEMORY_UTILIZATION=0.95       # fraction of GPU VRAM used for weights + KV cache
-
-VLLM_MEMORY_REQUEST="12Gi"             # k8s pod RAM request (≈ model weights in fp16)
-VLLM_MEMORY_LIMIT="24Gi"              # k8s pod RAM limit (request + headroom)
-```
-
-To switch models, update those values and re-run `./deploy.sh`. All scripts and Kubernetes manifests derive from this file automatically — nothing else needs to be touched.
-
-**Quick sizing guide:**
-
-| Model | Weights (fp16) | Min GPU VRAM | `MEMORY_REQUEST` | `MEMORY_LIMIT` |
-|-------|---------------|-------------|-----------------|----------------|
-| 7B    | ~14 GB        | 16 GB       | 12Gi            | 24Gi           |
-| 8B    | ~16 GB        | 24 GB       | 16Gi            | 28Gi           |
-| 10B   | ~20 GB        | 24 GB       | 20Gi            | 32Gi           |
-| 13B   | ~26 GB        | 40 GB       | 24Gi            | 40Gi           |
-
-If the model requires a HuggingFace token (e.g. Llama), set `HF_TOKEN=<your_token>` before running `setup.sh`.
+1. Download the new model to the repo root (e.g., `Llama-3.2-1B-Instruct/`)
+2. Edit `scripts/provision_model_artifacts.sh` — set `MODEL_SOURCE_DIR`
+3. Edit `deploy/llmd-local/modelservice-values.yaml`:
+   - `modelArtifacts.name` — the served model name
+   - `decode.containers[0].args` — the `--served-model-name` and `--max-model-len` flags
+   - `decode.containers[0].resources` — GPU/memory limits
+4. Edit `deploy/k8s-fastapi/fastapi-configmap.fullstack.yaml` — set `GENERATION_MODEL_NAME`
+5. Re-run `./deploy.sh`
 
 ## Adding More vLLM Workers
 
@@ -75,14 +57,14 @@ Edit `deploy/llmd-local/modelservice-values.yaml`:
 decode:
   replicas: 2        # scale out decode workers
   parallelism:
-    tensor: 1        # tensor parallelism per worker
+    tensor: 1         # tensor parallelism per worker
 ```
 
 The llm-d gateway routes requests across all workers automatically.
 
 ## Semantic Cache Embedding Model
 
-By default, the semantic cache uses **bge-base-en-v1.5** — the same model used for RAG embeddings. This means only two models are downloaded (BGE + the LLM), keeping the setup lighter and faster.
+By default, the semantic cache uses **bge-base-en-v1.5** — the same model used for RAG embeddings. This means only two models are downloaded (BGE + Qwen), keeping the setup lighter and faster.
 
 **Optional: using all-MiniLM-L6-v2 instead**
 
@@ -116,16 +98,6 @@ TENANT_ID=myTenant FORCE_REINGEST=1 ./deploy.sh
 
 ## Environment Variables
 
-### deploy/model.env — model configuration (edit this to change models)
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MODEL_NAME` | `Qwen2.5-7B-Instruct` | Model directory name and served model name |
-| `MODEL_HF_REPO` | `Qwen/Qwen2.5-7B-Instruct` | HuggingFace repo for download |
-| `VLLM_MAX_MODEL_LEN` | `32768` | Max context length |
-| `VLLM_GPU_MEMORY_UTILIZATION` | `0.95` | Fraction of GPU VRAM for vLLM |
-| `VLLM_MEMORY_REQUEST` | `12Gi` | k8s RAM request for vLLM pod |
-| `VLLM_MEMORY_LIMIT` | `24Gi` | k8s RAM limit for vLLM pod |
-
 ### setup.sh
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -152,23 +124,25 @@ Nothing is installed on the host machine directly (except NVIDIA drivers and min
 
 | Component | Docker Image | Deployed Via | What It Does |
 |---|---|---|---|
-| **Milvus** (vector DB) | `milvusdb/milvus:v2.5.12` | `deploy/k8s-storage/milvus.yaml` | Stores RAG chunks and semantic-cache embeddings as vector collections |
+| **Milvus** (vector DB) | `milvusdb/milvus:v2.6.11` | `deploy/k8s-storage/milvus.yaml` | Stores RAG chunks and semantic-cache embeddings as vector collections |
 | **etcd** (Milvus metadata) | `quay.io/coreos/etcd:v3.5.18` | same file | Key-value store that Milvus uses for internal metadata and coordination |
 | **MinIO** (Milvus object store) | `minio/minio:RELEASE.2023-03-20T...` | same file | S3-compatible blob store that Milvus uses for segment storage |
 | **MongoDB** (cache payloads) | `mongo:8` | `deploy/k8s-storage/mongo.yaml` | Stores full cached LLM responses for the semantic cache layer |
 | **SeaweedFS** (RAG chunk store) | `chrislusf/seaweedfs:latest` | `deploy/k8s-storage/seaweedfs.yaml` | S3-compatible object store holding raw PDF text chunks for RAG retrieval (4 pods: master, volume, filer, s3) |
-| **vLLM** (LLM inference) | `ghcr.io/llm-d/llm-d-cuda:v0.6.0` | Helm chart `llm-d-modelservice-v0.4.8.tgz` | GPU-accelerated inference server running the configured model, OpenAI-compatible API |
+| **vLLM** (LLM inference) | `ghcr.io/llm-d/llm-d-cuda:v0.6.0` | Helm chart `llm-d-modelservice-v0.4.8.tgz` | GPU-accelerated inference server running the Qwen model, OpenAI-compatible API |
 | **llm-d gateway** (routing) | `ghcr.io/llm-d/llm-d-routing-sidecar:v0.7.1` | Helm chart `llm-d-infra-v1.3.10.tgz` | Routes inference requests across vLLM workers with load balancing |
 | **FastAPI orchestrator** | Built locally from `src/service/` | `deploy/k8s-fastapi/` | The main application — routes queries through semantic cache → RAG → LLM |
 | **Istio** (service mesh) | Public Istio images | Installed by `setup.sh` via `istioctl` | Provides the Gateway API that fronts the llm-d inference endpoint |
 
+When `deploy.sh` runs `kubectl apply -f deploy/k8s-storage/milvus.yaml`, Kubernetes reads the manifest, sees it needs the `milvusdb/milvus:v2.6.11` image, pulls it from Docker Hub, and starts a container from it as a Pod. The same happens for every service — manifests declare what to run, Kubernetes handles the container lifecycle. Helm charts (`.tgz` files) work the same way but with templating — `helm install` renders the templates into Kubernetes manifests and applies them.
+
 ### ML Models
 
-Two ML models are downloaded from HuggingFace by `scripts/download_models.sh` (model identity is read from `deploy/model.env`):
+Two ML models are downloaded from HuggingFace by `scripts/download_models.sh` and then provided to the containers that need them:
 
 | Model | Purpose | How It Reaches the Container |
 |---|---|---|
-| **LLM** (configured in model.env) | LLM generation | Copied into minikube's node filesystem at `/data/qwen-model` via `scripts/provision_model_artifacts.sh`, then mounted into the vLLM pod as a PersistentVolume |
+| **Qwen2.5-0.5B-Instruct** | LLM generation | Copied into minikube's node filesystem at `/data/qwen-model` via `scripts/provision_model_artifacts.sh`, then mounted into the vLLM pod as a PersistentVolume |
 | **bge-base-en-v1.5** | RAG + semantic cache embedding (768-dim) | Bundled into the FastAPI Docker image at build time via `scripts/prepare_fastapi_runtime_assets.sh` |
 
 Optionally, **all-MiniLM-L6-v2** (384-dim) can be used as an alternative semantic cache model — see [Semantic Cache Embedding Model](#semantic-cache-embedding-model) for details.
@@ -183,17 +157,16 @@ The two `.tgz` Helm chart archives in `deploy/llmd-local/` are **pre-packaged an
 1. Installs NVIDIA GPU drivers (if missing)
 2. Installs system dependencies: Docker, NVIDIA Container Toolkit, kubectl, Helm, minikube, Istio
 3. Starts minikube with GPU passthrough and deploys the NVIDIA device plugin
-4. Downloads the ML models from HuggingFace (reads `MODEL_NAME` and `MODEL_HF_REPO` from `deploy/model.env`)
+4. Downloads the 3 ML models from HuggingFace
 5. Downloads sample PDF documents from arxiv
 
 `deploy.sh` deploys the stack:
-1. Reads `deploy/model.env` — all model and resource settings flow from here
-2. `kubectl apply` the YAML manifests → Kubernetes pulls Docker images from public registries and starts containers
-3. `helm install` the llm-d charts with model settings rendered via `envsubst`
-4. Builds the FastAPI Docker image locally inside minikube's Docker daemon
-5. Runs the RAG ingestion pipeline (PDF → embeddings → Milvus + SeaweedFS)
-6. Verifies inference with a smoke test
-7. Sets up port-forwards so you can reach the services from `localhost`
+1. `kubectl apply` the YAML manifests → Kubernetes pulls Docker images from public registries and starts containers
+2. `helm install` the llm-d charts → same process for the inference gateway and vLLM
+3. Builds the FastAPI Docker image locally inside minikube's Docker daemon
+4. Runs the RAG ingestion pipeline (PDF → embeddings → Milvus + SeaweedFS)
+5. Verifies inference with a smoke test
+6. Sets up port-forwards so you can reach the services from `localhost`
 
 ## Project Layout
 
@@ -201,11 +174,6 @@ The two `.tgz` Helm chart archives in `deploy/llmd-local/` are **pre-packaged an
 llm-service-kernel/
   setup.sh                    # One-time machine setup
   deploy.sh                   # Full stack deploy + ingest
-  deploy/
-    model.env                 # ← Edit this to change the model (single source of truth)
-    k8s-storage/              # Milvus, MongoDB, SeaweedFS manifests
-    k8s-fastapi/              # FastAPI ConfigMap, Secrets, Deployment
-    llmd-local/               # llm-d Helm charts + values
   scripts/
     deploy_fullstack_single_node.sh   # K8s deployment orchestrator
     bootstrap_host_ubuntu.sh          # System dependency installer
@@ -216,4 +184,8 @@ llm-service-kernel/
     provision_model_artifacts.sh      # Copy LLM model into minikube
     prepare_fastapi_runtime_assets.sh # Bundle models for Docker image
   src/service/                # FastAPI application source
+  deploy/
+    k8s-storage/              # Milvus, MongoDB, SeaweedFS manifests
+    k8s-fastapi/              # FastAPI ConfigMap, Secrets, Deployment
+    llmd-local/               # llm-d Helm charts + values
 ```
